@@ -150,7 +150,11 @@ class HaikuTelegramBot:
 • Генерация занимает 1-3 секунды
         """
         
-        await update.message.reply_text(help_text)
+        # Проверяем, откуда пришел вызов
+        if update.callback_query:
+            await update.callback_query.edit_message_text(help_text)
+        else:
+            await update.message.reply_text(help_text)
     
     async def example_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показать примеры хокку"""
@@ -173,7 +177,11 @@ class HaikuTelegramBot:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(example_text, reply_markup=reply_markup)
+        # Проверяем, откуда пришел вызов
+        if update.callback_query:
+            await update.callback_query.edit_message_text(example_text, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(example_text, reply_markup=reply_markup)
     
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показать статистику бота"""
@@ -192,7 +200,11 @@ class HaikuTelegramBot:
 ⏰ Время работы: {datetime.now().strftime('%H:%M:%S')}
         """
         
-        await update.message.reply_text(stats_text)
+        # Проверяем, откуда пришел вызов
+        if update.callback_query:
+            await update.callback_query.edit_message_text(stats_text)
+        else:
+            await update.message.reply_text(stats_text)
     
     async def generate_haiku(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Генерация хокку по первой строке"""
@@ -293,33 +305,67 @@ class HaikuTelegramBot:
             ]
             import random
             random_start = random.choice(random_starts)
-            await query.message.reply_text(
+            await query.edit_message_text(
                 f"🎲 Случайная первая строка: **{random_start}**\n\n"
                 f"Отправьте эту строку для генерации хокку!",
                 parse_mode='Markdown'
             )
         elif query.data.startswith("regenerate:"):
             first_line = query.data.split(":", 1)[1]
-            # Создаем новое сообщение для регенерации
-            class FakeMessage:
-                def __init__(self, text):
-                    self.text = text
+            
+            # Показываем, что бот печатает
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            
+            try:
+                # Генерируем новое хокку
+                completion = self.generator.generate_haiku_completion(
+                    first_line, 
+                    max_length=15, 
+                    temperature=0.9  # Увеличиваем температуру для большего разнообразия
+                )
+                
+                if completion and completion.strip():
+                    # Форматируем результат
+                    haiku_text = f"🌸 **Новый вариант хокку:**\n\n"
+                    haiku_text += f"*{first_line}*\n"
+                    haiku_text += f"{completion}\n\n"
+                    haiku_text += "✨ *Создано нейросетью*"
                     
-            fake_update = Update(
-                update_id=update.update_id,
-                message=FakeMessage(first_line),
-                effective_user=update.effective_user,
-                effective_chat=update.effective_chat
-            )
-            await self.generate_haiku(fake_update, context)
+                    # Кнопки для взаимодействия
+                    keyboard = [
+                        [InlineKeyboardButton("🔄 Еще вариант", callback_data=f"regenerate:{first_line}")],
+                        [InlineKeyboardButton("💾 Сохранить", callback_data=f"save:{first_line}:{completion}")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    await query.message.reply_text(
+                        haiku_text, 
+                        reply_markup=reply_markup,
+                        parse_mode='Markdown'
+                    )
+                    
+                    self.stats['successful_generations'] += 1
+                else:
+                    await query.message.reply_text(
+                        "😅 Не получилось создать новый вариант. Попробуйте еще раз."
+                    )
+                    self.stats['failed_generations'] += 1
+                    
+            except Exception as e:
+                logger.error(f"Ошибка при регенерации хокку: {e}")
+                await query.message.reply_text(
+                    "😵 Произошла ошибка при создании нового варианта. Попробуйте еще раз."
+                )
+                self.stats['failed_generations'] += 1
+                
         elif query.data.startswith("save:"):
             parts = query.data.split(":", 2)
             if len(parts) == 3:
                 first_line, completion = parts[1], parts[2]
                 saved_haiku = f"{first_line}\n{completion}"
-                await query.message.reply_text(
+                await query.edit_message_text(
                     f"💾 **Сохраненное хокку:**\n\n{saved_haiku}\n\n"
-                    f"📋 Скопировано в буфер обмена!",
+                    f"📋 Готово для копирования!",
                     parse_mode='Markdown'
                 )
     
